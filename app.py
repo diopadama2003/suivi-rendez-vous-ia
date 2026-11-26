@@ -222,6 +222,7 @@ def colorier(valeur):
 import re
 import unicodedata
 import time
+import urllib.error
 import urllib.request
 
 MOTS_MEDICAUX = ["diagnostic", "medicament", "traitement", "symptome", "douleur", "dose", "posologie",
@@ -733,20 +734,60 @@ def cle_llm():
         return ""
 
 
-def appeler_llm(prompt: str) -> str:
-    """Appelle Gemini (API REST). Renvoie le texte brut, ou lève une exception."""
-    modele = "gemini-2.5-flash"
+MODELES_GEMINI = ["gemini-3.5-flash-lite", "gemini-3.6-flash", "gemini-3.8-flash", "gemini-2.5-flash"]
+URL_GEMINI = "https://generativelanguage.googleapis.com/v1beta/"
+
+
+def _requete_gemini(chemin, corps=None):
+    requete = urllib.request.Request(URL_GEMINI + chemin, data=corps,
+                                     headers={"Content-Type": "application/json", "x-goog-api-key": cle_llm()})
+    with urllib.request.urlopen(requete, timeout=6) as rep:
+        return json.load(rep)
+
+
+def modeles_a_essayer():
+    """Modèle choisi dans les secrets, puis modèle qui a déjà marché, puis les modèles connus."""
+    liste = []
     try:
-        modele = st.secrets.get("GEMINI_MODEL", modele)
+        liste.append(st.secrets.get("GEMINI_MODEL", ""))
     except Exception:
         pass
-    url = f"https://generativelanguage.googleapis.com/v1beta/models/{modele}:generateContent"
+    liste.append(st.session_state.get("modele_gemini_ok", ""))
+    liste += MODELES_GEMINI
+    vus = []
+    for m in liste:
+        if m and m not in vus:
+            vus.append(m)
+    return vus
+
+
+def appeler_llm(prompt: str) -> str:
+    """Appelle Gemini (API REST) en cherchant un modèle disponible. Renvoie le texte brut, ou lève une exception."""
     corps = json.dumps({"contents": [{"parts": [{"text": prompt}]}],
-                        "generationConfig": {"temperature": 0, "responseMimeType": "application/json"}}).encode()
-    requete = urllib.request.Request(url, data=corps, headers={"Content-Type": "application/json",
-                                                               "x-goog-api-key": cle_llm()})
-    with urllib.request.urlopen(requete, timeout=6) as rep:
-        return json.load(rep)["candidates"][0]["content"]["parts"][0]["text"]
+                        "generationConfig": {"responseMimeType": "application/json"}}).encode()
+    derniere = None
+    for modele in modeles_a_essayer():
+        try:
+            rep = _requete_gemini(f"models/{modele}:generateContent", corps)
+            st.session_state.modele_gemini_ok = modele
+            return rep["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError as erreur:
+            derniere = erreur
+            if erreur.code != 404:  # 404 = ce modèle n'existe plus : on essaie le suivant
+                raise
+    # aucun modèle connu : on demande à Google la liste de ceux que la clé peut utiliser
+    liste = _requete_gemini("models?pageSize=200").get("models", [])
+    candidats = [m["name"].split("/")[-1] for m in liste
+                 if "generateContent" in m.get("supportedGenerationMethods", []) and "flash" in m["name"]
+                 and not any(x in m["name"] for x in ("image", "tts", "live", "audio", "embedding", "thinking"))]
+    for modele in candidats:
+        try:
+            rep = _requete_gemini(f"models/{modele}:generateContent", corps)
+            st.session_state.modele_gemini_ok = modele
+            return rep["candidates"][0]["content"]["parts"][0]["text"]
+        except urllib.error.HTTPError:
+            continue
+    raise derniere or RuntimeError("aucun modèle Gemini disponible")
 
 
 def choisir_outil(question: str):
