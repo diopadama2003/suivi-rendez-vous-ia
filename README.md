@@ -51,6 +51,8 @@ python -m streamlit run app.py
 ## Activer le modèle de langage (optionnel)
 Par défaut, l'assistant comprend les questions grâce à des règles. Pour qu'il comprenne des phrases libres, on peut lui brancher un modèle de langage (Gemini, clé gratuite sur Google AI Studio) : il choisit seulement l'outil à appeler, et la réponse vient toujours des données et du modèle de prédiction. Ajouter dans les *Secrets* de Streamlit (ou dans `.streamlit/secrets.toml` en local, fichier à ne jamais déposer sur GitHub) :
 ```
-GEMINI_API_KEY = "votre_clé"
+GEMINI_API_KEY = "cle"
 ```
 Sans clé, ou en cas de panne, l'assistant revient automatiquement aux règles.
+
+Application en ligne : https://suivi-rdv-ia.streamlit.app
